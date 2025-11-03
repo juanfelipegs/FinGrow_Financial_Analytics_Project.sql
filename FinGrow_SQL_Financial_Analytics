@@ -1,0 +1,140 @@
+/*
+------------------------------------------------------------
+  PROJECT: FinGrow Financial Performance SQL Analytics
+  DESCRIPTION: Intermediate-level SQL project analyzing a
+               digital bank’s financial KPIs.
+  AUTHOR: Juan Felipe Gonzalez
+  ------------------------------------------------------------
+  TABLES USED:
+    - customers(customer_id, name, age, gender, city, signup_date, segment)
+    - accounts(account_id, customer_id, account_type, open_date, balance)
+    - transactions(transaction_id, account_id, transaction_date, transaction_type, amount)
+    - loans(loan_id, customer_id, loan_type, issue_date, amount_issued, interest_rate, loan_status)
+    - payments(payment_id, loan_id, payment_date, payment_amount)
+------------------------------------------------------------
+*/
+
+------------------------------------------------------------
+-- 1️⃣ Monthly Net Inflow (Deposits - Withdrawals)
+------------------------------------------------------------
+SELECT 
+    DATE_TRUNC('month', t.transaction_date) AS month,
+    SUM(CASE WHEN t.transaction_type = 'Deposit' THEN t.amount ELSE 0 END) AS total_deposits,
+    SUM(CASE WHEN t.transaction_type = 'Withdrawal' THEN t.amount ELSE 0 END) AS total_withdrawals,
+    SUM(CASE WHEN t.transaction_type = 'Deposit' THEN t.amount 
+             WHEN t.transaction_type = 'Withdrawal' THEN -t.amount 
+             ELSE 0 END) AS net_inflow
+FROM transactions t
+GROUP BY 1
+ORDER BY 1;
+
+
+------------------------------------------------------------
+-- 2️⃣ Average Account Balance by Customer Segment
+------------------------------------------------------------
+SELECT 
+    c.segment,
+    ROUND(AVG(a.balance), 2) AS avg_balance
+FROM accounts a
+JOIN customers c ON a.customer_id = c.customer_id
+GROUP BY c.segment
+ORDER BY avg_balance DESC;
+
+
+------------------------------------------------------------
+-- 3️⃣ Loan Portfolio Performance: Default Rate
+------------------------------------------------------------
+SELECT 
+    COUNT(CASE WHEN l.loan_status = 'Defaulted' THEN 1 END)::FLOAT 
+        / COUNT(*) * 100 AS default_rate_percent
+FROM loans l;
+
+
+------------------------------------------------------------
+-- 4️⃣ Interest Income from Active Loans
+------------------------------------------------------------
+SELECT 
+    l.loan_type,
+    ROUND(SUM(p.payment_amount * (l.interest_rate / 100.0)), 2) AS total_interest_income
+FROM loans l
+JOIN payments p ON l.loan_id = p.loan_id
+WHERE l.loan_status = 'Active'
+GROUP BY l.loan_type
+ORDER BY total_interest_income DESC;
+
+
+------------------------------------------------------------
+-- 5️⃣ Customer Growth Over Time
+------------------------------------------------------------
+SELECT 
+    DATE_TRUNC('month', signup_date) AS month,
+    COUNT(*) AS new_customers
+FROM customers
+GROUP BY 1
+ORDER BY 1;
+
+
+------------------------------------------------------------
+-- 6️⃣ Customer Churn Rate (Closed Accounts)
+------------------------------------------------------------
+-- Assuming accounts table has a 'close_date' column (nullable)
+SELECT 
+    DATE_TRUNC('month', close_date) AS month,
+    COUNT(*) AS closed_accounts
+FROM accounts
+WHERE close_date IS NOT NULL
+GROUP BY 1
+ORDER BY 1;
+
+
+------------------------------------------------------------
+-- 7️⃣ Top 10 High-Value Customers by Transaction Volume
+------------------------------------------------------------
+SELECT 
+    c.customer_id,
+    c.name,
+    ROUND(SUM(t.amount), 2) AS total_volume
+FROM customers c
+JOIN accounts a ON c.customer_id = a.customer_id
+JOIN transactions t ON a.account_id = t.account_id
+GROUP BY c.customer_id, c.name
+ORDER BY total_volume DESC
+LIMIT 10;
+
+
+------------------------------------------------------------
+-- 8️⃣ Active Loan Summary by Segment
+------------------------------------------------------------
+SELECT 
+    c.segment,
+    COUNT(l.loan_id) AS total_loans,
+    ROUND(AVG(l.amount_issued), 2) AS avg_loan_amount,
+    ROUND(SUM(l.amount_issued), 2) AS total_portfolio_value
+FROM loans l
+JOIN customers c ON l.customer_id = c.customer_id
+WHERE l.loan_status = 'Active'
+GROUP BY c.segment
+ORDER BY total_portfolio_value DESC;
+
+
+------------------------------------------------------------
+-- 9️⃣ KPI Summary View (for dashboard use)
+------------------------------------------------------------
+CREATE OR REPLACE VIEW kpi_summary AS
+SELECT 
+    (SELECT ROUND(SUM(CASE WHEN t.transaction_type = 'Deposit' THEN t.amount 
+                           WHEN t.transaction_type = 'Withdrawal' THEN -t.amount ELSE 0 END), 2)
+     FROM transactions t) AS total_net_inflow,
+    
+    (SELECT ROUND(AVG(balance), 2) FROM accounts) AS avg_account_balance,
+    
+    (SELECT COUNT(CASE WHEN l.loan_status = 'Defaulted' THEN 1 END)::FLOAT / COUNT(*) * 100
+     FROM loans l) AS default_rate_percent,
+     
+    (SELECT ROUND(SUM(p.payment_amount * (l.interest_rate / 100.0)), 2)
+     FROM loans l JOIN payments p ON l.loan_id = p.loan_id
+     WHERE l.loan_status = 'Active') AS total_interest_income;
+
+-- To visualize:
+-- SELECT * FROM kpi_summary;
+------------------------------------------------------------
